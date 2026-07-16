@@ -1,0 +1,20 @@
+{
+  "eyebrow": "CORÉE DU SUD — GUIDE DE LA VILLE",
+  "tagline": "La plateforme d'information touristique n°1 de Corée",
+  "writeBtn": "Écrire dans la communauté",
+  "tabs": {
+    "accommodations": "Hébergements",
+    "touristSites": "Attractions",
+    "culture": "Culture",
+    "festivals": "Festivals",
+    "shopping": "Shopping"
+  },
+  "communitySection": "Communauté des voyageurs",
+  "statsSection": "Statistiques de voyage",
+  "reviewsTitle": "Avis des visiteurs",
+  "reserve": "Réserver",
+  "save": "Enregistrer",
+  "addToRoute": "Ajouter à l'itinéraire",
+  "removeFromRoute": "Retirer de l'itinéraire",
+  "myRoute": "Mon itinéraire"
+}

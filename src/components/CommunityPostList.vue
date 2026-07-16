@@ -44,21 +44,22 @@ const emit = defineEmits(['select']);
 <style scoped>
 .board-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.8rem;
 }
 
 .post-item {
   text-align: left;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 0.9rem;
-  background: #f9fafb;
+  border: 1.5px solid var(--line, #e5e7eb);
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  background: var(--surface, #f9fafb);
   cursor: pointer;
-  transition: background 0.2s;
+  transition: border-color 0.2s, transform 0.15s;
 }
 
 .post-item:hover {
-  background: #f3f4f6;
+  border-color: var(--accent, #57cc99);
+  transform: translateY(-2px);
 }
 
 .post-header {
@@ -68,6 +69,10 @@ const emit = defineEmits(['select']);
   margin-bottom: 0.4rem;
 }
 
+.post-header strong {
+  color: var(--ink, #111827);
+}
+
 .rating {
   font-size: 0.9rem;
   color: #f59e0b;
@@ -75,30 +80,31 @@ const emit = defineEmits(['select']);
 
 .content {
   margin: 0.4rem 0;
-  color: #4b5563;
+  color: var(--ink-soft, #4b5563);
 }
 
 .address {
   margin: 0 0 0.4rem;
-  color: #2563eb;
+  color: var(--accent-strong, #3dae7f);
   font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .post-meta {
   display: flex;
   gap: 0.8rem;
   font-size: 0.85rem;
-  color: #6b7280;
+  color: var(--ink-faint, #6b7280);
   flex-wrap: wrap;
 }
 
 .price {
-  font-weight: 600;
-  color: #059669;
+  font-weight: 700;
+  color: var(--accent-strong, #059669);
 }
 
 .empty-state {
-  color: #6b7280;
+  color: var(--ink-faint, #6b7280);
   padding: 1rem 0;
 }
 </style>

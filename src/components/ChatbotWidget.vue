@@ -168,7 +168,7 @@ function clearChat() {
   height: 60px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, #2d5f7c 0%, #1e3a4a 100%);
+  background: linear-gradient(135deg, var(--accent, #57cc99) 0%, var(--accent-strong, #3dae7f) 100%);
   color: white;
   font-size: 1.6rem;
   cursor: pointer;
@@ -201,7 +201,7 @@ function clearChat() {
 }
 
 .chat-header {
-  background: linear-gradient(135deg, #2d5f7c 0%, #1e3a4a 100%);
+  background: linear-gradient(135deg, var(--accent, #57cc99) 0%, var(--accent-strong, #3dae7f) 100%);
   color: white;
   padding: 1rem 1.2rem;
   display: flex;
@@ -270,7 +270,7 @@ function clearChat() {
 }
 
 .chat-bubble-row.user .chat-bubble {
-  background: linear-gradient(135deg, #2d5f7c 0%, #1e3a4a 100%);
+  background: linear-gradient(135deg, var(--accent, #57cc99) 0%, var(--accent-strong, #3dae7f) 100%);
   color: white;
   border-bottom-right-radius: 4px;
 }
@@ -326,7 +326,7 @@ function clearChat() {
 
 .chat-input:focus {
   outline: none;
-  border-color: #2d5f7c;
+  border-color: var(--accent, #57cc99);
 }
 
 .chat-send-btn {
@@ -335,7 +335,7 @@ function clearChat() {
   flex-shrink: 0;
   border: none;
   border-radius: 10px;
-  background: linear-gradient(135deg, #2d5f7c 0%, #1e3a4a 100%);
+  background: linear-gradient(135deg, var(--accent, #57cc99) 0%, var(--accent-strong, #3dae7f) 100%);
   color: white;
   font-size: 1.1rem;
   cursor: pointer;

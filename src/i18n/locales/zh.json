@@ -1,0 +1,20 @@
+{
+  "eyebrow": "韩国 — 城市指南",
+  "tagline": "韩国领先的旅游信息平台",
+  "writeBtn": "发布到社区",
+  "tabs": {
+    "accommodations": "住宿",
+    "touristSites": "景点",
+    "culture": "文化设施",
+    "festivals": "节日",
+    "shopping": "购物"
+  },
+  "communitySection": "旅行者社区",
+  "statsSection": "旅行统计",
+  "reviewsTitle": "访客评价",
+  "reserve": "预订咨询",
+  "save": "收藏",
+  "addToRoute": "加入路线",
+  "removeFromRoute": "从路线中移除",
+  "myRoute": "我的路线"
+}

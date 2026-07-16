@@ -1,15 +1,123 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue';
+import { nextTick, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { setupLeafletIcons } from './utils/leafletIcon';
+import { SUPPORTED_LOCALES } from './i18n';
 import CommunityBoard from './components/CommunityBoard.vue';
+import WeatherWidget from './components/WeatherWidget.vue';
 import ChatbotWidget from './components/ChatbotWidget.vue';
+import FestivalCalendar from './components/FestivalCalendar.vue';
+import RoutePlanner from './components/RoutePlanner.vue';
+import NotificationBell from './components/NotificationBell.vue';
 import { loadSeoulData } from './utils/dataLoader';
+import { fetchTourDetail } from './utils/tourDetail';
+
+setupLeafletIcons();
+
+const { t, locale } = useI18n();
 
 const regionData = ref(null);
 const selectedHotel = ref(null);
 const activeTab = ref('accommodations');
-const mapReady = ref(false);
+const currentView = ref('home'); // 'home' | 'community'
+const visibleCount = ref(12);
+
+watch(activeTab, () => {
+  visibleCount.value = 12;
+});
+
+function showMoreItems() {
+  visibleCount.value += 12;
+}
 const theme = ref('light');
 const communityRef = ref(null);
+const routeItems = ref([]);
+const showRoutePlanner = ref(false);
+const mapContainer = ref(null);
+const detailLoading = ref(false);
+const favoriteItems = ref([]);
+const showFavorites = ref(false);
+const reserveNotice = ref('');
+let leafletMap = null;
+let leafletMarker = null;
+
+watch(locale, (value) => {
+  localStorage.setItem('seoul-guide-locale', value);
+});
+
+function loadFavorites() {
+  try {
+    const saved = localStorage.getItem('seoul-guide-favorites');
+    favoriteItems.value = saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    favoriteItems.value = [];
+  }
+}
+
+watch(
+  favoriteItems,
+  (value) => {
+    try {
+      localStorage.setItem('seoul-guide-favorites', JSON.stringify(value));
+    } catch (e) {
+      // 저장 실패는 무시
+    }
+  },
+  { deep: true }
+);
+
+function isFavorited(item) {
+  return favoriteItems.value.some((i) => i.contentid === item.contentid);
+}
+
+function toggleFavorite(item) {
+  if (!item) return;
+  if (isFavorited(item)) {
+    favoriteItems.value = favoriteItems.value.filter((i) => i.contentid !== item.contentid);
+  } else {
+    favoriteItems.value = [
+      ...favoriteItems.value,
+      { contentid: item.contentid, title: item.title, firstimage: item.firstimage, addr1: item.addr1 }
+    ];
+  }
+}
+
+function openFavorite(fav) {
+  const allItems = ['accommodations', 'touristSites', 'culture', 'festivals', 'shopping']
+    .flatMap((cat) => getItemsForTab(cat));
+  const original = allItems.find((i) => i.contentid === fav.contentid);
+  if (original) selectHotel(original);
+}
+
+function handleReserve(item) {
+  const homepage = getHomepageUrl(item);
+  if (homepage) {
+    window.open(homepage, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  if (item?.tel) {
+    window.location.href = 'tel:' + item.tel;
+    return;
+  }
+  reserveNotice.value = '문의 가능한 연락처 정보가 없는 장소예요.';
+  setTimeout(() => {
+    reserveNotice.value = '';
+  }, 3000);
+}
+
+function isInRoute(item) {
+  return routeItems.value.some((i) => i.contentid === item.contentid);
+}
+
+function toggleRouteItem(item) {
+  if (isInRoute(item)) {
+    routeItems.value = routeItems.value.filter((i) => i.contentid !== item.contentid);
+  } else {
+    routeItems.value = [...routeItems.value, item];
+  }
+}
 
 /**
  * 외부 플레이스홀더 서비스(via.placeholder.com 등)는 안정성이 떨어져
@@ -24,15 +132,24 @@ function placeholderImage(text = '이미지 없음') {
   return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
 }
 
+function goHome() {
+  currentView.value = 'home';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function goToCommunity() {
+  closeModal();
+  currentView.value = 'community';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function goToCommunityWrite() {
-  const section = document.getElementById('community-section');
-  if (section) {
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-  // 스크롤이 끝난 뒤 자연스럽게 글쓰기 폼을 연다.
-  setTimeout(() => {
+  closeModal();
+  currentView.value = 'community';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  nextTick(() => {
     communityRef.value?.openWriteForm(activeTab.value);
-  }, 350);
+  });
 }
 
 const tabs = [
@@ -92,8 +209,8 @@ const reviewsByCategory = {
 
 onMounted(async () => {
   regionData.value = await loadSeoulData();
-  loadKakaoMap();
   initTheme();
+  loadFavorites();
 });
 
 function initTheme() {
@@ -124,24 +241,32 @@ watch(theme, (value) => {
   }
 });
 
-function loadKakaoMap() {
-  const script = document.createElement('script');
-  script.src = 'https://dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KAKAO_APP_KEY&libraries=services';
-  script.onload = () => {
-    mapReady.value = true;
-  };
-  document.head.appendChild(script);
-}
-
 function selectHotel(item) {
   selectedHotel.value = item;
-  setTimeout(() => {
-    initMap(item);
-  }, 100);
+  detailLoading.value = true;
+  nextTick(() => renderHotelMap(item));
+
+  fetchTourDetail(item.contentid, item.contenttypeid).then((detail) => {
+    detailLoading.value = false;
+    if (!detail || selectedHotel.value?.contentid !== item.contentid) return;
+    // 목록 데이터(item)에 상세정보를 덧붙여 갱신한다. 기존 필드는 유지하고
+    // 비어있지 않은 상세 필드만 덮어써서, 상세 API가 일부 값만 줘도 안전하다.
+    const merged = { ...selectedHotel.value };
+    Object.entries(detail).forEach(([key, value]) => {
+      if (value) merged[key] = value;
+    });
+    selectedHotel.value = merged;
+  });
 }
 
 function closeModal() {
   selectedHotel.value = null;
+  detailLoading.value = false;
+  if (leafletMap) {
+    leafletMap.remove();
+    leafletMap = null;
+    leafletMarker = null;
+  }
 }
 
 function getItemsForTab(tabId) {
@@ -149,12 +274,44 @@ function getItemsForTab(tabId) {
   return regionData.value[tabId] || [];
 }
 
-function getRandomPrice() {
-  return Math.floor(Math.random() * (200000 - 80000 + 1)) + 80000;
+/**
+ * TourAPI의 homepage 필드는 순수 URL이 아니라
+ * <a href="...">...</a> 형태의 HTML 문자열로 오는 경우가 많아 파싱한다.
+ */
+function getHomepageUrl(item) {
+  const raw = item?.homepage;
+  if (!raw || typeof raw !== 'string') return null;
+
+  const hrefMatch = raw.match(/href\s*=\s*"([^"]+)"/i);
+  if (hrefMatch) return hrefMatch[1];
+
+  if (/^https?:\/\//i.test(raw.trim())) return raw.trim();
+
+  return null;
 }
 
-function getRandomRating() {
-  return (Math.random() * (5 - 4) + 4).toFixed(1);
+// 같은 항목을 다시 볼 때 가격·평점·리뷰가 매번 바뀌면 안 되므로,
+// contentid 기준으로 한 번만 생성하고 이후엔 캐시된 값을 재사용한다.
+const statsCache = new Map();
+
+function getItemStats(item) {
+  if (!item) return { price: 0, rating: '0.0', reviewCount: 0, reviews: [] };
+
+  if (!statsCache.has(item.contentid)) {
+    statsCache.set(item.contentid, {
+      price: Math.floor(Math.random() * (200000 - 80000 + 1)) + 80000,
+      rating: (Math.random() * (5 - 4) + 4).toFixed(1),
+      reviewCount: Math.floor(Math.random() * 500 + 100),
+      reviews: getRandomReviews(item.contenttypeid ? categoryOfType(item.contenttypeid) : activeTab.value)
+    });
+  }
+
+  return statsCache.get(item.contentid);
+}
+
+function categoryOfType(contentTypeId) {
+  const map = { '32': 'accommodations', '12': 'touristSites', '14': 'culture', '15': 'festivals', '38': 'shopping' };
+  return map[String(contentTypeId)] || activeTab.value;
 }
 
 function getRandomReviews(category, count = 4) {
@@ -180,25 +337,25 @@ function getRandomReviews(category, count = 4) {
   return result;
 }
 
-function initMap(item) {
-  if (!mapReady.value) return;
+function renderHotelMap(item) {
+  if (!item.mapx || !item.mapy || !mapContainer.value) return;
 
-  const mapContainer = document.getElementById('map');
-  if (!mapContainer) return;
+  const lat = parseFloat(item.mapy);
+  const lng = parseFloat(item.mapx);
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
-  const mapOption = {
-    center: new window.kakao.maps.LatLng(parseFloat(item.mapy), parseFloat(item.mapx)),
-    level: 3
-  };
+  if (!leafletMap) {
+    leafletMap = L.map(mapContainer.value).setView([lat, lng], 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19
+    }).addTo(leafletMap);
+  } else {
+    leafletMap.setView([lat, lng], 16);
+  }
 
-  const map = new window.kakao.maps.Map(mapContainer, mapOption);
-
-  const marker = new window.kakao.maps.Marker({
-    position: mapOption.center,
-    title: item.title
-  });
-
-  marker.setMap(map);
+  if (leafletMarker) leafletMarker.remove();
+  leafletMarker = L.marker([lat, lng]).addTo(leafletMap).bindPopup(item.title).openPopup();
 }
 
 function getStarRating(count) {
@@ -208,15 +365,30 @@ function getStarRating(count) {
 
 <template>
   <div class="app-shell" :data-theme="theme">
-    <!-- 마스트헤드 -->
+    <!-- 헤더 -->
     <header class="navbar">
       <div class="navbar-content">
-        <div class="navbar-top">
-          <p class="eyebrow">SOUTH KOREA — CITY GUIDE</p>
+        <div class="navbar-actions-row">
           <div class="navbar-actions">
-            <button class="write-btn" type="button" @click="goToCommunityWrite">
-              커뮤니티 글쓰기
+            <button
+              class="nav-btn"
+              :class="{ active: currentView === 'community' }"
+              type="button"
+              @click="goToCommunity"
+            >
+              커뮤니티
             </button>
+            <button class="write-btn" type="button" @click="goToCommunityWrite">
+              {{ t('writeBtn') }}
+            </button>
+            <button class="favorites-btn" type="button" @click="goHome(); showFavorites = !showFavorites">
+              ♥ 찜한 장소 ({{ favoriteItems.length }})
+            </button>
+            <select v-model="locale" class="locale-select" aria-label="언어 선택">
+              <option v-for="l in SUPPORTED_LOCALES" :key="l.code" :value="l.code">
+                {{ l.label }}
+              </option>
+            </select>
             <button
               class="theme-toggle"
               type="button"
@@ -227,13 +399,40 @@ function getStarRating(count) {
             </button>
           </div>
         </div>
-        <h1 class="logo">서울 여행 완벽 가이드</h1>
-        <p class="tagline">한국 최고의 여행 정보 플랫폼</p>
+        <div class="navbar-brand">
+          <h1 class="logo" @click="goHome" role="button" tabindex="0" @keydown.enter="goHome">
+            서울 여행 완벽 가이드
+          </h1>
+          <p class="tagline">{{ t('tagline') }}</p>
+        </div>
       </div>
     </header>
 
     <!-- 메인 컨텐츠 -->
     <main class="main-content">
+      <!-- ============ 홈 화면 ============ -->
+      <template v-if="currentView === 'home'">
+      <WeatherWidget />
+
+      <!-- 찜한 장소 패널 -->
+      <div v-if="showFavorites" class="favorites-panel">
+        <p v-if="favoriteItems.length === 0" class="empty-favorites">
+          아직 찜한 장소가 없어요. 카드를 눌러 상세보기에서 "찜하기"를 눌러보세요.
+        </p>
+        <div v-else class="favorites-list">
+          <button
+            v-for="fav in favoriteItems"
+            :key="fav.contentid"
+            type="button"
+            class="favorite-chip"
+            @click="openFavorite(fav)"
+          >
+            <span class="favorite-chip-title">{{ fav.title }}</span>
+            <span class="favorite-chip-remove" @click.stop="toggleFavorite(fav)">✕</span>
+          </button>
+        </div>
+      </div>
+
       <!-- 탭 네비게이션 -->
       <nav class="tab-navigation" aria-label="카테고리">
         <button
@@ -242,15 +441,35 @@ function getStarRating(count) {
           :class="['tab-btn', { active: activeTab === tab.id }]"
           @click="activeTab = tab.id"
         >
-          <span class="tab-label">{{ tab.label }}</span>
+          <span class="tab-label">{{ t('tabs.' + tab.id) }}</span>
         </button>
       </nav>
+
+      <p v-if="regionData" class="result-count">
+        {{ t('tabs.' + activeTab) }} 전체 {{ getItemsForTab(activeTab).length }}곳 중
+        {{ Math.min(visibleCount, getItemsForTab(activeTab).length) }}곳 표시
+      </p>
+
+      <!-- 축제 캘린더 (축제 탭에서만 표시) -->
+      <FestivalCalendar v-if="activeTab === 'festivals' && regionData" :festivals="regionData.festivals" />
+
+      <!-- 나의 코스 (관광지 탭에서만 표시) -->
+      <div v-if="activeTab === 'touristSites'" class="route-toggle-row">
+        <button class="route-toggle-btn" type="button" @click="showRoutePlanner = !showRoutePlanner">
+          {{ t('myRoute') }} ({{ routeItems.length }})
+        </button>
+      </div>
+      <RoutePlanner
+        v-if="activeTab === 'touristSites' && showRoutePlanner"
+        :items="routeItems"
+        @remove="toggleRouteItem"
+      />
 
       <!-- 컨텐츠 섹션 -->
       <section class="content-section">
         <div v-if="regionData" class="items-grid">
           <div
-            v-for="item in getItemsForTab(activeTab).slice(0, 12)"
+            v-for="item in getItemsForTab(activeTab).slice(0, visibleCount)"
             :key="item.contentid"
             class="item-card"
             @click="selectHotel(item)"
@@ -263,28 +482,43 @@ function getStarRating(count) {
                 @error="$event.target.src = placeholderImage(item.title)"
               />
               <div v-else class="placeholder">📷</div>
+              <span class="card-tag">{{ t('tabs.' + activeTab) }}</span>
               <div class="card-badge">
                 <span v-if="activeTab === 'accommodations'">
-                  ₩{{ getRandomPrice().toLocaleString() }}
+                  ₩{{ getItemStats(item).price.toLocaleString() }}
                 </span>
-                <span v-else>★ {{ getRandomRating() }}</span>
+                <span v-else>★ {{ getItemStats(item).rating }}</span>
               </div>
             </div>
+            <button
+              v-if="activeTab === 'touristSites'"
+              type="button"
+              class="route-add-btn"
+              @click.stop="toggleRouteItem(item)"
+            >
+              {{ isInRoute(item) ? t('removeFromRoute') : t('addToRoute') }}
+            </button>
 
             <div class="card-body">
               <h3 class="card-title">{{ item.title }}</h3>
-              <p class="card-address">{{ item.addr1?.substring(0, 30) }}...</p>
+              <p v-if="item.addr1" class="card-address">📍 {{ item.addr1?.substring(0, 30) }}</p>
 
               <div class="card-footer">
                 <span v-if="activeTab === 'accommodations'" class="availability available">
                   예약가능
                 </span>
-                <span v-else class="rating">★ {{ getRandomRating() }} / 5</span>
+                <span v-else class="rating">★ {{ getItemStats(item).rating }} / 5</span>
               </div>
             </div>
           </div>
         </div>
         <div v-else class="loading">로딩 중...</div>
+
+        <div v-if="regionData && visibleCount < getItemsForTab(activeTab).length" class="show-more-row">
+          <button class="show-more-btn" type="button" @click="showMoreItems">
+            더보기 (+{{ Math.min(12, getItemsForTab(activeTab).length - visibleCount) }})
+          </button>
+        </div>
       </section>
 
       <!-- 상세 정보 모달 -->
@@ -305,50 +539,93 @@ function getStarRating(count) {
 
           <div class="modal-body">
             <div class="modal-title-section">
-              <p class="modal-eyebrow">{{ tabs.find(t => t.id === activeTab)?.label }}</p>
+              <span class="modal-eyebrow">{{ tabs.find(tb => tb.id === activeTab)?.label }}</span>
               <h2>{{ selectedHotel.title }}</h2>
               <div class="modal-rating">
                 <span class="stars">{{ getStarRating(5) }}</span>
-                <span class="rating-text">{{ getRandomRating() }} · {{ Math.floor(Math.random() * 500 + 100) }}개 리뷰</span>
+                <span class="rating-text">
+                  {{ getItemStats(selectedHotel).rating }} · {{ getItemStats(selectedHotel).reviewCount }}개 리뷰
+                </span>
               </div>
             </div>
 
             <!-- 지도 -->
-            <div v-if="mapReady" class="map-container">
-              <div id="map" class="map"></div>
+            <div v-if="selectedHotel.mapx && selectedHotel.mapy" class="map-container">
+              <div ref="mapContainer" class="map"></div>
             </div>
 
             <div class="modal-info-grid">
-              <div class="info-item">
-                <span class="info-label">주소</span>
+              <div v-if="selectedHotel.addr1" class="info-item">
+                <span class="info-label">📍 주소</span>
                 <span class="info-value">{{ selectedHotel.addr1 }}</span>
               </div>
               <div v-if="selectedHotel.tel" class="info-item">
-                <span class="info-label">전화</span>
-                <span class="info-value">{{ selectedHotel.tel }}</span>
+                <span class="info-label">☎️ 전화</span>
+                <span class="info-value">
+                  <a :href="'tel:' + selectedHotel.tel" class="info-link">{{ selectedHotel.tel }}</a>
+                </span>
+              </div>
+              <div v-if="getHomepageUrl(selectedHotel)" class="info-item">
+                <span class="info-label">🌐 홈페이지</span>
+                <span class="info-value">
+                  <a :href="getHomepageUrl(selectedHotel)" target="_blank" rel="noopener noreferrer" class="info-link">
+                    {{ getHomepageUrl(selectedHotel) }} ↗
+                  </a>
+                </span>
+              </div>
+              <div v-if="selectedHotel.usetime" class="info-item">
+                <span class="info-label">🕐 이용시간</span>
+                <span class="info-value">{{ selectedHotel.usetime }}</span>
+              </div>
+              <div v-if="selectedHotel.opentime" class="info-item">
+                <span class="info-label">🕐 운영시간</span>
+                <span class="info-value">{{ selectedHotel.opentime }}</span>
+              </div>
+              <div v-if="selectedHotel.checkintime" class="info-item">
+                <span class="info-label">🛎️ 체크인</span>
+                <span class="info-value">{{ selectedHotel.checkintime }}</span>
+              </div>
+              <div v-if="selectedHotel.checkouttime" class="info-item">
+                <span class="info-label">🚪 체크아웃</span>
+                <span class="info-value">{{ selectedHotel.checkouttime }}</span>
+              </div>
+              <div v-if="selectedHotel.restdate" class="info-item">
+                <span class="info-label">🚫 휴무일</span>
+                <span class="info-value">{{ selectedHotel.restdate }}</span>
+              </div>
+              <div v-if="selectedHotel.parking" class="info-item">
+                <span class="info-label">🅿️ 주차</span>
+                <span class="info-value">{{ selectedHotel.parking }}</span>
               </div>
               <div v-if="activeTab === 'accommodations'" class="info-item">
-                <span class="info-label">가격</span>
-                <span class="info-value">₩{{ getRandomPrice().toLocaleString() }} / 박</span>
+                <span class="info-label">💰 가격</span>
+                <span class="info-value">₩{{ getItemStats(selectedHotel).price.toLocaleString() }} / 박</span>
+              </div>
+              <div v-if="selectedHotel.infocenter" class="info-item">
+                <span class="info-label">📞 문의처</span>
+                <span class="info-value">{{ selectedHotel.infocenter }}</span>
               </div>
               <div v-if="selectedHotel.zipcode" class="info-item">
-                <span class="info-label">우편번호</span>
+                <span class="info-label">📮 우편번호</span>
                 <span class="info-value">{{ selectedHotel.zipcode }}</span>
               </div>
             </div>
 
+            <p v-if="detailLoading" class="detail-loading">상세정보를 불러오는 중...</p>
+            <p v-if="selectedHotel.overview" class="overview-text">{{ selectedHotel.overview }}</p>
+
             <!-- 리뷰 섹션 -->
             <div class="reviews-container">
-              <p class="section-eyebrow">VISITOR VOICES</p>
-              <h3>방문객 리뷰</h3>
+              <h3>{{ t('reviewsTitle') }}</h3>
               <div class="reviews-grid">
                 <blockquote
-                  v-for="(review, idx) in getRandomReviews(activeTab, 4)"
+                  v-for="(review, idx) in getItemStats(selectedHotel).reviews"
                   :key="idx"
                   class="review-card"
                 >
                   <p class="review-text">{{ review.review }}</p>
                   <footer class="review-footer">
+                    <span class="review-avatar">{{ review.name.charAt(0) }}</span>
                     <span class="review-name">{{ review.name }}</span>
                     <span class="review-stars">{{ getStarRating(review.rating) }}</span>
                     <span class="review-date">{{ review.daysAgo }}일 전</span>
@@ -359,23 +636,39 @@ function getStarRating(count) {
 
             <!-- 예약 버튼 -->
             <div class="modal-actions">
-              <button class="btn-primary">예약 문의</button>
-              <button class="btn-secondary">찜하기</button>
+              <button class="btn-primary" type="button" @click="handleReserve(selectedHotel)">
+                {{ t('reserve') }}
+              </button>
+              <button
+                class="btn-secondary"
+                type="button"
+                :class="{ favorited: isFavorited(selectedHotel) }"
+                @click="toggleFavorite(selectedHotel)"
+              >
+                {{ isFavorited(selectedHotel) ? '✓ 찜 완료' : t('save') }}
+              </button>
             </div>
+            <p v-if="reserveNotice" class="reserve-notice">{{ reserveNotice }}</p>
           </div>
         </div>
       </div>
+      </template>
 
-      <!-- 커뮤니티 섹션 -->
-      <section id="community-section" class="community-wrapper">
-        <p class="section-eyebrow">TRAVELER COMMUNITY</p>
-        <h2 class="section-title">여행자 커뮤니티</h2>
-        <CommunityBoard ref="communityRef" :initial-category="activeTab" />
-      </section>
+      <!-- ============ 커뮤니티 화면 ============ -->
+      <template v-else-if="currentView === 'community'">
+        <div class="community-view">
+          <button class="back-home-btn" type="button" @click="goHome">← 홈으로</button>
+          <h2 class="section-title">{{ t('communitySection') }}</h2>
+          <CommunityBoard ref="communityRef" :initial-category="activeTab" />
+        </div>
+      </template>
     </main>
 
     <!-- 챗봇 -->
     <ChatbotWidget v-if="regionData" :region-data="regionData" />
+
+    <!-- 폴링 기반 알림 -->
+    <NotificationBell />
 
     <!-- 푸터 -->
     <footer class="footer">
@@ -385,19 +678,21 @@ function getStarRating(count) {
 </template>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;600&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
 
 .app-shell {
-  /* ---- 라이트 모드 토큰 ---- */
-  --paper: #FAF8F4;
+  /* ---- 라이트 모드 토큰 (토스 스타일) ---- */
+  --paper: #F9F9F5;
   --surface: #FFFFFF;
-  --ink: #201C19;
-  --ink-soft: #6B6259;
-  --ink-faint: #A79E93;
-  --accent: #7A3B3B;
-  --accent-soft: #B8935A;
-  --line: #E3DBCD;
-  --shadow: rgba(32, 28, 25, 0.08);
+  --ink: #191F28;
+  --ink-soft: #4E5968;
+  --ink-faint: #8B95A1;
+  --accent: #57CC99;
+  --accent-strong: #3DAE7F;
+  --accent-soft: #DFF5EA;
+  --line: #E7E7E1;
+  --danger: #F04452;
+  --shadow: rgba(25, 31, 28, 0.08);
 
   min-height: 100vh;
   background: var(--paper);
@@ -405,20 +700,22 @@ function getStarRating(count) {
   padding-bottom: 2rem;
   margin: 0;
   width: 100%;
-  font-family: 'Inter', 'Noto Sans KR', sans-serif;
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
   transition: background 0.25s ease, color 0.25s ease;
 }
 
 .app-shell[data-theme='dark'] {
-  --paper: #17140F;
-  --surface: #201B15;
-  --ink: #EFE8DC;
-  --ink-soft: #B3A793;
-  --ink-faint: #756B5C;
-  --accent: #D98A8A;
-  --accent-soft: #E4C078;
-  --line: #3A332A;
-  --shadow: rgba(0, 0, 0, 0.35);
+  --paper: #14171A;
+  --surface: #1E2226;
+  --ink: #F2F4F6;
+  --ink-soft: #B0B8C1;
+  --ink-faint: #6B7684;
+  --accent: #57CC99;
+  --accent-strong: #6FE0B3;
+  --accent-soft: #1C332B;
+  --line: #2C3236;
+  --danger: #FF6B76;
+  --shadow: rgba(0, 0, 0, 0.4);
 }
 
 .app-shell * {
@@ -432,71 +729,84 @@ html, body {
   overflow-x: hidden;
 }
 
-.serif,
-.logo,
-.card-title,
-.modal-title-section h2,
-.reviews-container h3,
-.section-title {
-  font-family: 'Noto Serif KR', serif;
-}
-
-.eyebrow,
-.section-eyebrow,
-.modal-eyebrow {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent-soft);
-  margin: 0 0 0.6rem;
-}
-
-/* ---------- 마스트헤드 ---------- */
+/* ---------- 헤더 ---------- */
 .navbar {
-  background: var(--paper);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
-  padding: 2rem 2rem 2.2rem;
+  padding: 1.2rem 2rem 1.6rem;
   width: 100%;
   box-sizing: border-box;
   margin: 0;
 }
 
 .navbar-content {
-  max-width: 960px;
+  max-width: 1080px;
   margin: 0 auto;
-  text-align: center;
 }
 
-.navbar-top {
+.navbar-actions-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-bottom: 1.2rem;
 }
 
 .navbar-actions {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.navbar-brand {
+  text-align: center;
+  padding: 1.4rem 1.5rem 0.4rem;
+}
+
+.nav-btn {
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.58rem 1.1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.nav-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.nav-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 4px 14px rgba(87, 204, 153, 0.35);
+}
+
+.nav-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .write-btn {
-  border: 1px solid var(--accent);
-  background: transparent;
-  color: var(--accent);
-  padding: 0.5rem 1rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  border: 1.5px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  padding: 0.58rem 1.1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background 0.15s ease;
 }
 
 .write-btn:hover {
   background: var(--accent);
-  color: var(--paper);
+  color: white;
 }
 
 .write-btn:focus-visible {
@@ -504,24 +814,66 @@ html, body {
   outline-offset: 2px;
 }
 
-.theme-toggle {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
+.favorites-btn {
+  border: 1.5px solid var(--line);
   background: var(--surface);
   color: var(--ink);
-  font-size: 1rem;
+  padding: 0.58rem 1.1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+}
+
+.favorites-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.favorites-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.locale-select {
+  height: 40px;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+}
+
+.locale-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.theme-toggle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 1.05rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+  transition: transform 0.15s ease, border-color 0.15s ease;
 }
 
 .theme-toggle:hover {
+  transform: scale(1.06);
   border-color: var(--accent);
-  transform: scale(1.05);
 }
 
 .theme-toggle:focus-visible {
@@ -530,61 +882,68 @@ html, body {
 }
 
 .logo {
-  font-size: 2.6rem;
-  margin: 0 0 0.5rem;
-  font-weight: 700;
+  font-size: 2.2rem;
+  margin: 0;
+  font-weight: 800;
   color: var(--ink);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  display: inline-block;
+}
+
+.logo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 
 .tagline {
-  font-family: 'Noto Serif KR', serif;
-  font-style: italic;
-  font-size: 1.05rem;
-  margin: 0;
+  font-size: 0.95rem;
+  margin: 0.4rem 0 0;
   color: var(--ink-soft);
+  font-weight: 500;
 }
 
 /* ---------- 메인 컨텐츠 ---------- */
 .main-content {
   width: 100%;
-  max-width: 1180px;
+  max-width: 1080px;
   box-sizing: border-box;
-  padding: 3rem 2rem 0;
+  padding: 2rem 2rem 0;
   margin: 0 auto;
 }
 
 /* ---------- 탭 네비게이션 ---------- */
 .tab-navigation {
   display: flex;
-  gap: 2rem;
-  margin-bottom: 3rem;
+  gap: 0.6rem;
+  margin-bottom: 2rem;
   flex-wrap: wrap;
-  justify-content: center;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 0;
 }
 
 .tab-btn {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 0.4rem 0.1rem 1rem;
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  padding: 0.7rem 1.3rem;
   cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--ink-faint);
-  letter-spacing: 0.02em;
-  transition: color 0.2s ease, border-color 0.2s ease;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .tab-btn:hover {
   color: var(--ink);
+  border-color: var(--accent);
 }
 
 .tab-btn.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 4px 14px rgba(87, 204, 153, 0.35);
 }
 
 .tab-btn:focus-visible {
@@ -592,40 +951,171 @@ html, body {
   outline-offset: 3px;
 }
 
+.route-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1.2rem;
+}
+
+.route-toggle-btn {
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.6rem 1.2rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+}
+
+.route-toggle-btn:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+
+.route-add-btn {
+  width: 100%;
+  margin-top: 0.7rem;
+  padding: 0.6rem;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.route-add-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.favorites-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.4rem;
+}
+
+.empty-favorites {
+  color: var(--ink-faint);
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+.favorites-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.favorite-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  padding: 0.5rem 0.5rem 0.5rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.83rem;
+  font-weight: 700;
+  cursor: pointer;
+  max-width: 220px;
+}
+
+.favorite-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-chip-remove {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.favorite-chip-remove:hover {
+  background: white;
+}
+
+.result-count {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: -1rem 0 1.4rem;
+}
+
 /* ---------- 컨텐츠 섹션 ---------- */
 .content-section {
   background: transparent;
   padding: 0;
-  margin-bottom: 4rem;
+  margin-bottom: 3.5rem;
   width: 100%;
   box-sizing: border-box;
 }
 
 .items-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-  gap: 2.5rem 2rem;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1.3rem;
+}
+
+.show-more-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.8rem;
+}
+
+.show-more-btn {
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.75rem 1.8rem;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+}
+
+.show-more-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
 }
 
 /* ---------- 아이템 카드 ---------- */
 .item-card {
-  background: transparent;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.25s ease;
+  box-shadow: 0 2px 8px var(--shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .item-card:hover {
   transform: translateY(-4px);
+  box-shadow: 0 10px 24px var(--shadow);
 }
 
 .card-image {
   position: relative;
   width: 100%;
-  height: 210px;
+  height: 180px;
   overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--paper);
 }
 
 .card-image img {
@@ -645,37 +1135,50 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 2.5rem;
+  font-size: 2.4rem;
+}
+
+.card-tag {
+  position: absolute;
+  left: 0.7rem;
+  top: 0.7rem;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--accent-strong);
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
 }
 
 .card-badge {
   position: absolute;
-  left: 0;
-  bottom: 0;
-  background: rgba(23, 20, 15, 0.78);
-  color: #F4EFE6;
-  padding: 0.4rem 0.9rem;
-  font-family: 'Noto Serif KR', serif;
-  font-size: 0.85rem;
-  letter-spacing: 0.02em;
+  left: 0.7rem;
+  bottom: 0.7rem;
+  background: rgba(25, 31, 40, 0.72);
+  color: white;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  backdrop-filter: blur(4px);
 }
 
 .card-body {
-  padding: 1.2rem 0.1rem 0;
+  padding: 1rem 1.1rem 1.2rem;
 }
 
 .card-title {
-  margin: 0 0 0.5rem;
-  font-size: 1.15rem;
+  margin: 0 0 0.4rem;
+  font-size: 1.02rem;
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.35;
 }
 
 .card-address {
-  color: var(--ink-soft);
-  font-size: 0.85rem;
-  margin: 0 0 1rem;
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+  margin: 0 0 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -685,20 +1188,19 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-top: 0.8rem;
+  padding-top: 0.7rem;
   border-top: 1px solid var(--line);
   font-size: 0.85rem;
 }
 
 .availability {
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--accent);
+  font-weight: 700;
+  color: var(--accent-strong);
 }
 
 .rating {
   color: var(--ink-soft);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* ---------- 모달 ---------- */
@@ -708,7 +1210,7 @@ html, body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(15, 13, 10, 0.68);
+  background: rgba(15, 18, 20, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -717,30 +1219,30 @@ html, body {
 }
 
 .modal-card {
-  background: var(--paper);
+  background: var(--surface);
   color: var(--ink);
   width: 100%;
   max-width: 820px;
   max-height: 90vh;
   overflow-y: auto;
   position: relative;
-  box-shadow: 0 24px 64px var(--shadow);
-  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.25);
 }
 
 .modal-close {
   position: absolute;
   top: 1rem;
   right: 1rem;
-  width: 38px;
-  height: 38px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  width: 40px;
+  height: 40px;
+  background: rgba(25, 31, 40, 0.55);
+  border: none;
   border-radius: 50%;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   cursor: pointer;
   z-index: 10;
-  color: var(--ink);
+  color: white;
 }
 
 .modal-close:focus-visible {
@@ -750,7 +1252,7 @@ html, body {
 
 .modal-header {
   width: 100%;
-  height: 320px;
+  height: 300px;
   overflow: hidden;
 }
 
@@ -767,197 +1269,245 @@ html, body {
   align-items: center;
   justify-content: center;
   font-size: 3.5rem;
-  background: var(--surface);
+  background: var(--paper);
 }
 
 .modal-body {
-  padding: 2.8rem 3rem;
+  padding: 2.2rem 2.4rem 2.6rem;
 }
 
 .modal-title-section {
-  margin-bottom: 2rem;
+  margin-bottom: 1.8rem;
+  padding-bottom: 1.4rem;
   border-bottom: 1px solid var(--line);
-  padding-bottom: 1.6rem;
+}
+
+.modal-eyebrow {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  margin-bottom: 0.7rem;
 }
 
 .modal-title-section h2 {
-  margin: 0 0 0.8rem;
-  font-size: 2rem;
-  font-weight: 700;
+  margin: 0 0 0.7rem;
+  font-size: 1.7rem;
+  font-weight: 800;
   color: var(--ink);
+  letter-spacing: -0.01em;
 }
 
 .modal-rating {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.6rem;
 }
 
 .stars {
-  font-size: 1rem;
-  letter-spacing: 2px;
-  color: var(--accent-soft);
+  font-size: 0.95rem;
+  letter-spacing: 1px;
+  color: var(--accent-strong);
 }
 
 .rating-text {
   color: var(--ink-soft);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 500;
 }
 
 /* ---------- 지도 ---------- */
 .map-container {
-  margin: 1.8rem 0;
+  margin: 1.6rem 0;
+  border-radius: 16px;
   overflow: hidden;
-  border: 1px solid var(--line);
 }
 
 .map {
   width: 100%;
-  height: 300px;
+  height: 280px;
 }
 
 /* ---------- 정보 목록 ---------- */
 .modal-info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 0;
-  margin-bottom: 2.4rem;
-  background: transparent;
-  padding: 0;
-  border-top: 1px solid var(--line);
+  margin-bottom: 1.6rem;
+  background: var(--paper);
+  padding: 0.4rem 1.2rem;
+  border-radius: 16px;
 }
 
 .info-item {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 1rem 0;
+  gap: 0.3rem;
+  padding: 0.8rem 0;
   border-bottom: 1px solid var(--line);
 }
 
+.info-item:nth-last-child(-n+2) {
+  border-bottom: none;
+}
+
 .info-label {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent-soft);
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--ink-faint);
 }
 
 .info-value {
   color: var(--ink);
-  font-size: 0.98rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  word-break: break-word;
 }
 
-/* ---------- 리뷰 (voices) ---------- */
+.info-link {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.info-link:hover {
+  text-decoration: underline;
+}
+
+.detail-loading {
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
+}
+
+.overview-text {
+  color: var(--ink-soft);
+  line-height: 1.7;
+  margin: 1.2rem 0 0;
+  font-size: 0.95rem;
+}
+
+/* ---------- 리뷰 ---------- */
 .reviews-container {
-  margin: 2.6rem 0;
+  margin: 2.2rem 0;
 }
 
 .reviews-container h3 {
   color: var(--ink);
-  margin: 0 0 1.6rem;
-  font-size: 1.4rem;
-  font-weight: 700;
+  margin: 0 0 1.2rem;
+  font-size: 1.2rem;
+  font-weight: 800;
 }
 
 .reviews-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
 }
 
 .review-card {
-  background: var(--surface);
-  padding: 1.6rem 1.4rem 1.2rem;
-  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 1.2rem 1.3rem;
+  border-radius: 16px;
   margin: 0;
-  position: relative;
 }
 
 .review-text {
-  font-family: 'Noto Serif KR', serif;
   color: var(--ink);
-  line-height: 1.7;
-  margin: 0 0 1rem;
-  font-size: 0.98rem;
-}
-
-.review-text::before {
-  content: '“';
-  font-family: 'Noto Serif KR', serif;
-  font-size: 2rem;
-  color: var(--accent-soft);
-  line-height: 0;
-  display: block;
-  margin-bottom: 0.6rem;
+  line-height: 1.6;
+  margin: 0 0 0.9rem;
+  font-size: 0.92rem;
+  font-weight: 500;
 }
 
 .review-footer {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
-  padding-top: 0.8rem;
-  border-top: 1px solid var(--line);
+}
+
+.review-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .review-name {
-  font-weight: 600;
-  font-size: 0.85rem;
+  font-weight: 700;
+  font-size: 0.82rem;
   color: var(--ink);
 }
 
 .review-stars {
-  color: var(--accent-soft);
-  font-size: 0.75rem;
+  color: var(--accent-strong);
+  font-size: 0.72rem;
   letter-spacing: 1px;
 }
 
 .review-date {
   color: var(--ink-faint);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   margin-left: auto;
 }
 
 /* ---------- 액션 버튼 ---------- */
 .modal-actions {
   display: flex;
-  gap: 1.2rem;
-  margin-top: 2.4rem;
-  align-items: center;
+  gap: 0.8rem;
+  margin-top: 2rem;
 }
 
 .btn-primary,
 .btn-secondary {
-  padding: 0.9rem 1.8rem;
+  flex: 1;
+  padding: 0.95rem;
   border: none;
-  font-size: 0.92rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  border-radius: 14px;
+  font-size: 0.95rem;
+  font-weight: 700;
   cursor: pointer;
   transition: opacity 0.2s ease, background 0.2s ease;
 }
 
 .btn-primary {
   background: var(--accent);
-  color: #FBF6EE;
+  color: white;
 }
 
 .btn-primary:hover {
-  opacity: 0.88;
+  background: var(--accent-strong);
 }
 
 .btn-secondary {
-  background: none;
+  background: var(--paper);
   color: var(--ink);
-  border-bottom: 1px solid var(--ink);
-  padding-left: 0;
-  padding-right: 0;
 }
 
 .btn-secondary:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+  background: var(--line);
+}
+
+.btn-secondary.favorited {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.reserve-notice {
+  margin: 0.7rem 0 0;
+  font-size: 0.83rem;
+  color: var(--danger);
+  text-align: center;
 }
 
 .btn-primary:focus-visible,
@@ -966,16 +1516,40 @@ html, body {
   outline-offset: 2px;
 }
 
-/* ---------- 커뮤니티 섹션 ---------- */
-.community-wrapper {
-  margin-top: 4rem;
+/* ---------- 커뮤니티 화면 ---------- */
+.community-view {
+  padding-top: 0.5rem;
+  animation: fade-in 0.25s ease;
+}
+
+.back-home-btn {
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 1.4rem;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+}
+
+.back-home-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .section-title {
   color: var(--ink);
-  font-size: 1.7rem;
-  margin: 0 0 2rem;
-  font-weight: 700;
+  font-size: 1.5rem;
+  margin: 0 0 1.6rem;
+  font-weight: 800;
 }
 
 /* ---------- 푸터 ---------- */
@@ -983,20 +1557,19 @@ html, body {
   text-align: center;
   color: var(--ink-faint);
   padding: 2rem;
-  border-top: 1px solid var(--line);
   margin-top: 3rem;
   background: transparent;
   width: 100%;
   box-sizing: border-box;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
 }
 
 .loading {
   text-align: center;
   color: var(--ink-faint);
   padding: 3rem;
-  font-size: 1.05rem;
-  font-family: 'Noto Serif KR', serif;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1012,40 +1585,51 @@ html, body {
 
 @media (max-width: 768px) {
   .navbar {
-    padding: 1.5rem 1.2rem 1.8rem;
-  }
-
-  .navbar-top {
-    flex-wrap: wrap;
-    gap: 0.8rem;
-  }
-
-  .write-btn {
-    font-size: 0.76rem;
-    padding: 0.45rem 0.8rem;
+    padding: 1.4rem 1.2rem 1.2rem;
   }
 
   .logo {
-    font-size: 1.9rem;
+    font-size: 1.6rem;
+  }
+
+  .navbar-brand {
+    padding: 1.8rem 1.2rem;
+    border-radius: 18px;
+  }
+
+  .navbar-actions-row {
+    justify-content: center;
+  }
+
+  .navbar-actions {
+    justify-content: center;
+    gap: 0.5rem;
+  }
+
+  .write-btn {
+    font-size: 0.78rem;
+    padding: 0.5rem 0.9rem;
   }
 
   .main-content {
-    padding: 2rem 1.2rem 0;
-  }
-
-  .tab-navigation {
-    gap: 1.2rem;
-    justify-content: flex-start;
-    overflow-x: auto;
-  }
-
-  .tab-btn {
-    white-space: nowrap;
+    padding: 1.6rem 1.2rem 0;
   }
 
   .items-grid {
     grid-template-columns: 1fr;
-    gap: 2rem;
+    gap: 1.2rem;
+  }
+
+  .modal-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .info-item:nth-last-child(-n+2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .info-item:last-child {
+    border-bottom: none;
   }
 
   .modal-body {

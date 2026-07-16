@@ -140,29 +140,50 @@ function submit() {
 
 <style scoped>
 .form-box {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 1rem;
-  background: #fafafa;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 16px;
+  padding: 1.3rem;
+  background: var(--paper, #fafafa);
+}
+
+.form-box h3 {
+  color: var(--ink, #111827);
+  font-size: 1.1rem;
+  font-weight: 800;
+  margin: 0 0 1.1rem;
 }
 
 label {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.9rem;
+  color: var(--ink-soft, #374151);
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .hint {
-  color: #6b7280;
+  color: var(--ink-faint, #6b7280);
   font-size: 0.78rem;
+  font-weight: 400;
 }
 
 input,
 textarea {
-  padding: 0.65rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  border: 1.5px solid var(--line, #cbd5e1);
+  border-radius: 12px;
+  background: var(--surface, white);
+  color: var(--ink, #111827);
+  font-family: inherit;
+  font-size: 0.92rem;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent, #57cc99);
 }
 
 input[type="range"] {
@@ -171,25 +192,36 @@ input[type="range"] {
 
 .form-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
 button {
   border: none;
-  background: #2563eb;
+  background: var(--accent, #57cc99);
   color: white;
-  padding: 0.7rem 1rem;
-  border-radius: 8px;
+  padding: 0.75rem 1.2rem;
+  border-radius: 999px;
   cursor: pointer;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+button:hover {
+  background: var(--accent-strong, #3dae7f);
 }
 
 .ghost-btn {
-  background: #e5e7eb;
-  color: #111827;
+  background: var(--surface, #e5e7eb);
+  border: 1.5px solid var(--line, #e5e7eb);
+  color: var(--ink, #111827);
+}
+
+.ghost-btn:hover {
+  background: var(--line, #e5e7eb);
 }
 
 .error {
-  color: #dc2626;
+  color: var(--danger, #dc2626);
   font-weight: 600;
 }
 </style>

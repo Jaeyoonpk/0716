@@ -1,0 +1,20 @@
+{
+  "eyebrow": "SOUTH KOREA — CITY GUIDE",
+  "tagline": "Korea's Premier Travel Information Platform",
+  "writeBtn": "Write in Community",
+  "tabs": {
+    "accommodations": "Stays",
+    "touristSites": "Attractions",
+    "culture": "Culture",
+    "festivals": "Festivals",
+    "shopping": "Shopping"
+  },
+  "communitySection": "Traveler Community",
+  "statsSection": "Travel Stats",
+  "reviewsTitle": "Visitor Reviews",
+  "reserve": "Reserve",
+  "save": "Save",
+  "addToRoute": "Add to Route",
+  "removeFromRoute": "Remove from Route",
+  "myRoute": "My Route"
+}

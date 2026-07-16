@@ -1,5 +1,10 @@
 <script setup>
-import { nextTick, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { setupLeafletIcons } from '../utils/leafletIcon';
+
+setupLeafletIcons();
 
 const props = defineProps({
   items: {
@@ -15,71 +20,48 @@ let mapInstance = null;
 let polyline = null;
 let markers = [];
 
-function waitForKakao(timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (window.kakao?.maps) {
-        resolve();
-      } else if (Date.now() - start > timeoutMs) {
-        reject(new Error('지도를 불러오지 못했습니다.'));
-      } else {
-        setTimeout(check, 200);
-      }
-    };
-    check();
-  });
-}
-
 async function renderRoute() {
   if (props.items.length === 0 || !mapContainer.value) return;
 
-  try {
-    await waitForKakao();
-    await nextTick();
+  await nextTick();
 
-    const points = props.items
-      .filter((item) => item.mapx && item.mapy)
-      .map((item) => new window.kakao.maps.LatLng(parseFloat(item.mapy), parseFloat(item.mapx)));
+  const points = props.items
+    .filter((item) => item.mapx && item.mapy)
+    .map((item) => [parseFloat(item.mapy), parseFloat(item.mapx)]);
 
-    if (points.length === 0) return;
+  if (points.length === 0) return;
 
-    if (!mapInstance) {
-      mapInstance = new window.kakao.maps.Map(mapContainer.value, {
-        center: points[0],
-        level: 6
-      });
-    }
-
-    markers.forEach((m) => m.setMap(null));
-    markers = points.map(
-      (pos, idx) =>
-        new window.kakao.maps.Marker({
-          position: pos,
-          map: mapInstance,
-          title: props.items[idx]?.title
-        })
-    );
-
-    if (polyline) polyline.setMap(null);
-    polyline = new window.kakao.maps.Polyline({
-      path: points,
-      strokeWeight: 4,
-      strokeColor: '#7A3B3B',
-      strokeOpacity: 0.9,
-      strokeStyle: 'solid'
-    });
-    polyline.setMap(mapInstance);
-
-    const bounds = new window.kakao.maps.LatLngBounds();
-    points.forEach((p) => bounds.extend(p));
-    mapInstance.setBounds(bounds);
-  } catch (e) {
-    console.error('경로 지도 오류:', e);
+  if (!mapInstance) {
+    mapInstance = L.map(mapContainer.value);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19
+    }).addTo(mapInstance);
   }
+
+  markers.forEach((m) => m.remove());
+  markers = points.map((pos, idx) =>
+    L.marker(pos).addTo(mapInstance).bindTooltip(props.items[idx]?.title || '')
+  );
+
+  if (polyline) polyline.remove();
+  polyline = L.polyline(points, {
+    color: '#7A3B3B',
+    weight: 4,
+    opacity: 0.9
+  }).addTo(mapInstance);
+
+  mapInstance.fitBounds(polyline.getBounds(), { padding: [24, 24] });
 }
 
 watch(() => props.items.length, renderRoute, { immediate: true });
+
+onBeforeUnmount(() => {
+  if (mapInstance) {
+    mapInstance.remove();
+    mapInstance = null;
+  }
+});
 </script>
 
 <template>

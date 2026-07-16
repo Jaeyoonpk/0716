@@ -313,47 +313,65 @@ defineExpose({
 
 <style scoped>
 .board-section {
-  background: white;
-  border-radius: 16px;
-  padding: 1.2rem;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  background: var(--surface, white);
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 20px;
+  padding: 1.4rem;
+  box-shadow: 0 4px 16px rgba(25, 31, 28, 0.06);
 }
 
 .category-tabs {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid #e5e7eb;
-  padding-bottom: 0.8rem;
+  margin-bottom: 1.2rem;
+  border-bottom: 1px solid var(--line, #e5e7eb);
+  padding-bottom: 1rem;
 }
 
 .category-tab {
-  border: none;
-  background: #f3f4f6;
-  color: #4b5563;
-  padding: 0.5rem 1rem;
+  border: 1.5px solid var(--line, #e5e7eb);
+  background: var(--paper, #f3f4f6);
+  color: var(--ink-soft, #4b5563);
+  padding: 0.5rem 1.1rem;
   border-radius: 999px;
   cursor: pointer;
   font-size: 0.85rem;
-  font-weight: 600;
-  transition: background 0.2s, color 0.2s;
+  font-weight: 700;
+  box-shadow: inset 0 1px 2px rgba(25, 61, 45, 0.06);
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 
 .category-tab:hover {
-  background: #e5e7eb;
+  border-color: var(--accent, #57cc99);
+  color: var(--accent-strong, #3dae7f);
 }
 
 .category-tab.active {
-  background: #2563eb;
+  background: var(--accent, #57cc99);
+  border-color: var(--accent, #57cc99);
   color: white;
+  box-shadow: 0 4px 14px rgba(87, 204, 153, 0.35);
 }
 
 .board-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 1.2rem;
+}
+
+.board-header h2 {
+  color: var(--ink, #111827);
+  font-size: 1.3rem;
+  font-weight: 800;
+  margin: 0 0 0.3rem;
+}
+
+.board-header p {
+  color: var(--ink-soft, #6b7280);
+  font-size: 0.88rem;
+  margin: 0;
 }
 
 .board-header-actions {
@@ -362,31 +380,40 @@ defineExpose({
 }
 
 .reset-btn {
-  border: 1px solid #d1d5db;
-  background: white;
-  color: #6b7280;
-  padding: 0.7rem 1rem;
-  border-radius: 8px;
+  border: 1.5px solid var(--line, #d1d5db);
+  background: var(--surface, white);
+  color: var(--ink-faint, #6b7280);
+  padding: 0.65rem 1.1rem;
+  border-radius: 999px;
   cursor: pointer;
   font-size: 0.85rem;
+  font-weight: 700;
 }
 
 .reset-btn:hover {
-  border-color: #dc2626;
-  color: #dc2626;
+  border-color: var(--danger, #dc2626);
+  color: var(--danger, #dc2626);
 }
 
 .board-btn {
-  border: none;
-  background: #2563eb;
-  color: white;
-  padding: 0.7rem 1rem;
-  border-radius: 8px;
+  border: 1.5px solid var(--accent, #57cc99);
+  background: var(--accent-soft, #dff5ea);
+  color: var(--accent-strong, #3dae7f);
+  padding: 0.65rem 1.2rem;
+  border-radius: 999px;
   cursor: pointer;
+  font-weight: 700;
+  font-size: 0.85rem;
+  transition: background 0.15s ease;
+}
+
+.board-btn:hover {
+  background: var(--accent, #57cc99);
+  color: white;
 }
 
 .error {
-  color: #dc2626;
+  color: var(--danger, #dc2626);
   font-weight: 600;
   margin-bottom: 0.8rem;
 }

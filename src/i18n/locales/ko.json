@@ -1,0 +1,20 @@
+{
+  "eyebrow": "대한민국 — 도시 가이드",
+  "tagline": "한국 최고의 여행 정보 플랫폼",
+  "writeBtn": "커뮤니티 글쓰기",
+  "tabs": {
+    "accommodations": "숙박",
+    "touristSites": "관광지",
+    "culture": "문화시설",
+    "festivals": "축제",
+    "shopping": "쇼핑"
+  },
+  "communitySection": "여행자 커뮤니티",
+  "statsSection": "여행 통계",
+  "reviewsTitle": "방문객 리뷰",
+  "reserve": "예약 문의",
+  "save": "찜하기",
+  "addToRoute": "코스에 추가",
+  "removeFromRoute": "코스에서 제외",
+  "myRoute": "나의 코스"
+}
