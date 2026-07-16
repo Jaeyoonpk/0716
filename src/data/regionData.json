@@ -1,0 +1,15 @@
+{
+  "regionName": "서울",
+  "description": "한국관광공사 TourAPI 4.0 기반 서울 정보",
+  "dataSource": {
+    "name": "한국관광공사",
+    "url": "https://www.data.go.kr/data/15101578/openapi.do",
+    "license": "공공누리 제3유형"
+  },
+  "accommodations": [],
+  "touristSites": [],
+  "festivals": [],
+  "restaurants": [],
+  "shopping": [],
+  "culture": []
+}

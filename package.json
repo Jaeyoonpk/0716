@@ -1,0 +1,23 @@
+{
+  "name": "ai_onboarding_master",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fullcalendar/core": "^6.1.21",
+    "@fullcalendar/daygrid": "^6.1.21",
+    "@fullcalendar/vue3": "^6.1.21",
+    "chart.js": "^4.5.1",
+    "vue": "^3.5.39",
+    "vue-i18n": "^9.14.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "vite": "^8.1.1"
+  }
+}
