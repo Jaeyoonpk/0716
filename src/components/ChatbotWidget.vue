@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue';
-import { getChatbotReply } from '../utils/chatbotService';
+import { getChatbotReply } from '../utils/Chatbotservice';
 
 const props = defineProps({
   regionData: {
